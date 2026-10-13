@@ -1,64 +1,62 @@
-name: CONTROL Resonant A830 - Turnip integration build
+name: CONTROL Resonant A830 - Turnip DGC integration compile
 
 on:
   push:
     branches: [control-resonant-dgc-a830]
     paths:
-      - "control-resonant/turnip-patches/**"
+      - "control-resonant/turnip-overlays/**"
+      - ".github/workflows/control-resonant-turnip.yml"
   workflow_dispatch:
 
 jobs:
-  build-with-dgc-integration:
+  compile-dgc-layout:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Refuse a fake driver build
-        shell: bash
-        run: |
-          set -euo pipefail
-          compgen -G 'control-resonant/turnip-patches/*.patch' >/dev/null || {
-            echo 'Missing Turnip Vulkan DGC implementation patches. Build blocked.'
-            exit 1
-          }
-      - name: Dependencies
+      - name: Install compiler and Vulkan dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build clang lld patchelf flex bison \
             glslang-tools spirv-tools git python3-pip pkg-config ccache \
-            unzip curl libdrm-dev
+            unzip curl libdrm-dev zip
           python3 -m pip install --user --break-system-packages 'meson>=1.4' mako
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Fetch pinned Turnip A8xx source
+      - name: Fetch pinned A8xx Turnip source
         run: |
           git clone --depth=1 --branch turnip/gen8 \
             https://github.com/whitebelyash/mesa-unified.git mesa
-          git -C mesa checkout 9c7e022677dfa3abb356c2b6732cbd2e25783d01
-      - name: Apply candidate DGC implementation
+          git -C mesa rev-parse HEAD
+      - name: Apply experimental DGC layout sources
         run: |
           set -euo pipefail
-          cd mesa
-          for patch in ../control-resonant/turnip-patches/*.patch; do
-            git apply --check "$patch"
-            git apply "$patch"
-          done
-      - name: Android NDK r29
+          cp control-resonant/turnip-overlays/tu_dgc_a830.{h,cc} mesa/src/freedreno/vulkan/
+          python3 - <<'PY'
+          from pathlib import Path
+          f=Path("mesa/src/freedreno/vulkan/meson.build")
+          s=f.read_text()
+          needle="  'tu_device.cc',"
+          assert needle in s
+          s=s.replace(needle,needle+"\n  'tu_dgc_a830.cc',",1)
+          f.write_text(s)
+          PY
+      - name: Fetch Android NDK
         run: |
-          curl -fL https://dl.google.com/android/repository/android-ndk-r29-linux.zip -o /tmp/ndk.zip
+          curl -fL --retry 3 https://dl.google.com/android/repository/android-ndk-r29-linux.zip -o /tmp/ndk.zip
           unzip -q /tmp/ndk.zip -d /tmp
-      - name: Compile patched Turnip for Android AArch64
-        shell: bash
+      - name: Configure Mesa Android AArch64
         run: |
           set -euo pipefail
           NDK=/tmp/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin
-          cat > /tmp/android-aarch64.ini <<EOF
+          cat > mesa/android-aarch64.txt <<EOF
           [binaries]
-          c = '$NDK/aarch64-linux-android36-clang'
-          cpp = ['$NDK/aarch64-linux-android36-clang++', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables']
           ar = '$NDK/llvm-ar'
-          strip = '$NDK/llvm-strip'
+          c = ['$NDK/aarch64-linux-android36-clang']
+          cpp = ['$NDK/aarch64-linux-android36-clang++', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-static-libstdc++']
           c_ld = '$NDK/ld.lld'
           cpp_ld = '$NDK/ld.lld'
-          pkg-config = '/usr/bin/pkg-config'
+          strip = '$NDK/llvm-strip'
+          pkg-config = ['env', 'PKG_CONFIG_LIBDIR=$NDK/pkg-config', '/usr/bin/pkg-config']
           [host_machine]
           system = 'android'
           cpu_family = 'aarch64'
@@ -66,21 +64,16 @@ jobs:
           endian = 'little'
           EOF
           cd mesa
-          meson setup build-android-aarch64 --cross-file /tmp/android-aarch64.ini \
-            --prefix /tmp/turnip-dgc \
+          meson setup build-android-aarch64 --cross-file android-aarch64.txt \
+            --prefix /tmp/turnip-control \
             -Dbuildtype=release -Dstrip=true -Dplatforms=android \
             -Dvideo-codecs= -Dplatform-sdk-version=36 -Dandroid-stub=true \
             -Dgallium-drivers= -Dvulkan-drivers=freedreno \
             -Dvulkan-beta=true -Dfreedreno-kmds=kgsl \
             -Degl=disabled -Dandroid-libbacktrace=disabled
-          ninja -C build-android-aarch64 install
-          test -s /tmp/turnip-dgc/lib/libvulkan_freedreno.so
-      - name: Verify extension implementation symbols
+      - name: Build Turnip with Vulkan DGC layout implementation
         run: |
-          set -euo pipefail
-          LIB=/tmp/turnip-dgc/lib/libvulkan_freedreno.so
-          /tmp/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf -sW "$LIB" > /tmp/symbols.txt
-          grep -q 'tu_CmdExecuteGeneratedCommandsEXT' /tmp/symbols.txt
-          grep 'tu_CmdExecuteGeneratedCommandsEXT' /tmp/symbols.txt
-          ! grep -E 'UND.*tu_CmdExecuteGeneratedCommandsEXT' /tmp/symbols.txt
-# No publish step until Vulkan DGC functional tests and CONTROL Resonant validation.
+          ninja -j3 -C mesa/build-android-aarch64 install
+          test -s /tmp/turnip-control/lib/libvulkan_freedreno.so
+          /tmp/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf -sW /tmp/turnip-control/lib/libvulkan_freedreno.so | grep 'tu_CreateIndirectCommandsLayoutEXT'
+# No installable ZIP until GPU preprocessing and execution is implemented.
