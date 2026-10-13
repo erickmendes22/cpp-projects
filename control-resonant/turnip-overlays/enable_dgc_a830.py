@@ -39,7 +39,7 @@ once(
    if (fd_dev_gen(&pdevice->dev_id) == 8) {
       props->maxIndirectPipelineCount = 1;
       props->maxIndirectShaderObjectCount = 1;
-      props->maxIndirectSequenceCount = 1048576;
+      props->maxIndirectSequenceCount = 4096;
       props->maxIndirectCommandsTokenCount = 3;
       props->maxIndirectCommandsTokenOffset = 2047;
       props->maxIndirectCommandsIndirectStride = 2048;
