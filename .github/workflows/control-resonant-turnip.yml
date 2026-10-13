@@ -122,6 +122,11 @@ jobs:
           for symbol in CmdExecuteGeneratedCommandsEXT CmdPreprocessGeneratedCommandsEXT; do
             grep -q "$symbol" /tmp/turnip-symbols.txt
           done
+          # Weak UND references silently survive linking and crash at dispatch.
+          if awk '$7 == "UND" && $8 ~ /tu_(CreateIndirectCommandsLayoutEXT|DestroyIndirectCommandsLayoutEXT|GetGeneratedCommandsMemoryRequirementsEXT|CmdExecuteGeneratedCommandsEXT|CmdPreprocessGeneratedCommandsEXT)/ { print; bad=1 } END { exit !bad }' /tmp/turnip-symbols.txt; then
+            echo 'ERROR: unresolved A830 Vulkan DGC entrypoint template(s)'
+            exit 1
+          fi
           grep -q 'deviceGeneratedCommands' mesa/src/freedreno/vulkan/tu_device.cc
           grep -q 'tu_cs_set_writeable(stream, true)' mesa/src/freedreno/vulkan/tu_dgc_a830_cmd.inc
           echo 'A830 DGC code and Vulkan registration included in Android binary'

@@ -22,6 +22,7 @@ void tu_dgc_bridge_destroy(struct vk_device *,
                            struct vk_indirect_command_layout *);
 }
 
+template <chip CHIP>
 VKAPI_ATTR VkResult VKAPI_CALL
 tu_CreateIndirectCommandsLayoutEXT(VkDevice _device,
                                    const VkIndirectCommandsLayoutCreateInfoEXT *pCreateInfo,
@@ -37,7 +38,9 @@ tu_CreateIndirectCommandsLayoutEXT(VkDevice _device,
    *pLayout = tu_dgc_layout_to_handle(layout);
    return VK_SUCCESS;
 }
+TU_GENX(tu_CreateIndirectCommandsLayoutEXT);
 
+template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_DestroyIndirectCommandsLayoutEXT(VkDevice _device,
                                     VkIndirectCommandsLayoutEXT _layout,
@@ -48,7 +51,9 @@ tu_DestroyIndirectCommandsLayoutEXT(VkDevice _device,
    if (layout)
       tu_dgc_bridge_destroy(&device->vk, pAllocator, &layout->vk);
 }
+TU_GENX(tu_DestroyIndirectCommandsLayoutEXT);
 
+template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_GetGeneratedCommandsMemoryRequirementsEXT(
     VkDevice _device,
@@ -68,6 +73,7 @@ tu_GetGeneratedCommandsMemoryRequirementsEXT(
       count >= 32 ? UINT32_MAX : ((1u << count) - 1u);
    (void)layout;
 }
+TU_GENX(tu_GetGeneratedCommandsMemoryRequirementsEXT);
 
 /* Compiled from dgc_pm4_layout.comp in the Android builder. */
 #include "tu_dgc_a830_spv.h"
