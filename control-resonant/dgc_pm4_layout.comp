@@ -1,0 +1,67 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_scalar_block_layout : require
+// VK_EXT_device_generated_commands layout stream -> A8xx PM4.
+// Input is the VKD3D *patched Vulkan DGC stream*, NOT raw game commands.
+// Integration into Turnip's command buffer and dispatch is still required.
+layout(local_size_x=64) in;
+layout(buffer_reference, std430, buffer_reference_align=4)
+buffer Words { uint d[]; };
+layout(push_constant, scalar) uniform Args {
+    uint64_t indirect_address;
+    uint64_t output_pm4_address;
+    uint64_t sequence_count_address;
+    uint maximum_count;
+    uint indirect_stride;
+    uint index_token_offset;
+    uint constants_token_offset;
+    uint draw_token_offset;
+    uint shared_constant_register;
+    uint vertex_offset_register;
+    uint draw_initiator_u16;
+    uint draw_initiator_u32;
+} args;
+uint parity(uint v) {
+    v ^= v >> 16; v ^= v >> 8; v ^= v >> 4;
+    return ((~0x6996u) >> (v & 15u)) & 1u;
+}
+uint pkt4(uint r, uint n) {
+    return 0x40000000u | n | (parity(n) << 7) |
+           ((r & 0x3ffffu) << 8) | (parity(r) << 27);
+}
+uint pkt7(uint o, uint n) {
+    return 0x70000000u | n | (parity(n) << 15) |
+           ((o & 0x7fu) << 16) | (parity(o) << 23);
+}
+void main() {
+    uint seq = gl_GlobalInvocationID.x;
+    if (seq >= args.maximum_count) return;
+    uint count = args.sequence_count_address != 0ul ?
+        Words(args.sequence_count_address).d[0] : args.maximum_count;
+    bool enabled = seq < count;
+    uint64_t base = args.indirect_address + uint64_t(seq)*args.indirect_stride;
+    Words ib = Words(base + args.index_token_offset);
+    Words pc = Words(base + args.constants_token_offset);
+    Words draw = Words(base + args.draw_token_offset);
+    Words outpm4 = Words(args.output_pm4_address + uint64_t(seq)*64ul);
+    uint format = ib.d[3];
+    bool is16 = format == 57u;
+    bool is32 = format == 42u;
+    uint width = is16 ? 2u : 4u;
+    uint64_t index_va = uint64_t(ib.d[0]) | (uint64_t(ib.d[1]) << 32);
+    enabled = enabled && (is16 || is32) && ((index_va & uint64_t(width-1u)) == 0ul);
+    outpm4.d[0] = pkt4(args.shared_constant_register, 4u);
+    for (uint i=0u;i<4u;++i) outpm4.d[1u+i] = pc.d[i];
+    outpm4.d[5] = pkt4(args.vertex_offset_register, 2u);
+    outpm4.d[6] = draw.d[3]; // vertexOffset
+    outpm4.d[7] = draw.d[4]; // firstInstance
+    outpm4.d[8] = pkt7(0x38u, 7u);
+    outpm4.d[9] = is16 ? args.draw_initiator_u16 : args.draw_initiator_u32;
+    outpm4.d[10] = enabled ? draw.d[1] : 0u;
+    outpm4.d[11] = enabled ? draw.d[0] : 0u;
+    outpm4.d[12] = draw.d[2];
+    outpm4.d[13] = enabled ? ib.d[0] : 0u;
+    outpm4.d[14] = enabled ? ib.d[1] : 0u;
+    outpm4.d[15] = enabled ? ib.d[2] / width : 0u;
+}
