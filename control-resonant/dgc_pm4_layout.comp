@@ -2,13 +2,15 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 #extension GL_EXT_buffer_reference2 : require
 #extension GL_EXT_scalar_block_layout : require
-// VK_EXT_device_generated_commands layout stream -> A8xx PM4.
-// Input is the VKD3D *patched Vulkan DGC stream*, NOT raw game commands.
-// Integration into Turnip's command buffer and dispatch is still required.
-layout(local_size_x=64) in;
+/* Mesa Turnip A8xx: translate Vulkan DGC token stream to PM4.
+ * Draws use CP_DRAW_INDIRECT_MULTI (not CP_DRAW_INDX_OFFSET), which handles
+ * vertexOffset/firstInstance, including shader driver parameter loading.
+ * Output: twenty 32-bit words per generated sequence, contiguous IB payload.
+ */
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 layout(buffer_reference, std430, buffer_reference_align=4)
-buffer Words { uint d[]; };
-layout(push_constant, scalar) uniform Args {
+buffer WordBuffer { uint data[]; };
+layout(push_constant, scalar) uniform Parameters {
     uint64_t indirect_address;
     uint64_t output_pm4_address;
     uint64_t sequence_count_address;
@@ -18,74 +20,80 @@ layout(push_constant, scalar) uniform Args {
     uint constants_token_offset;
     uint draw_token_offset;
     uint shared_constant_register;
-    uint vertex_offset_register;
+    uint unused_vertex_offset_register;
     uint draw_initiator_u16;
     uint draw_initiator_u32;
     uint push_mode;
     uint load_state6_opcode;
     uint load_state6_control;
-} args;
-uint parity(uint v) {
-    v ^= v >> 16; v ^= v >> 8; v ^= v >> 4;
-    return ((~0x6996u) >> (v & 15u)) & 1u;
+    uint draw_packet_opcode;
+    uint draw_opcode_and_vs_offset;
+} p;
+
+uint parity(uint x) {
+    x ^= x >> 16; x ^= x >> 8; x ^= x >> 4;
+    return ((~0x6996u) >> (x & 15u)) & 1u;
 }
-uint pkt4(uint r, uint n) {
-    return 0x40000000u | n | (parity(n) << 7) |
-           ((r & 0x3ffffu) << 8) | (parity(r) << 27);
+uint pm4_pkt4(uint reg, uint count) {
+    return 0x40000000u | count | (parity(count) << 7u)
+           | ((reg & 0x3ffffu) << 8u) | (parity(reg) << 27u);
 }
-uint pkt7(uint o, uint n) {
-    return 0x70000000u | n | (parity(n) << 15) |
-           ((o & 0x7fu) << 16) | (parity(o) << 23);
+uint pm4_pkt7(uint op, uint count) {
+    return 0x70000000u | count | (parity(count) << 15u)
+           | ((op & 0x7fu) << 16u) | (parity(op) << 23u);
 }
 void main() {
     uint seq = gl_GlobalInvocationID.x;
-    if (seq >= args.maximum_count) return;
-    uint count = args.sequence_count_address != 0ul ?
-        Words(args.sequence_count_address).d[0] : args.maximum_count;
-    bool enabled = seq < count;
-    uint64_t base = args.indirect_address + uint64_t(seq)*args.indirect_stride;
-    Words ib = Words(base + args.index_token_offset);
-    Words pc = Words(base + args.constants_token_offset);
-    Words draw = Words(base + args.draw_token_offset);
-    Words outpm4 = Words(args.output_pm4_address + uint64_t(seq)*80ul);
-    uint format = ib.d[3];
-    bool is16 = format == 57u;
-    bool is32 = format == 42u;
-    uint width = is16 ? 2u : 4u;
-    uint64_t index_va = uint64_t(ib.d[0]) | (uint64_t(ib.d[1]) << 32);
-    enabled = enabled && (is16 || is32) && ((index_va & uint64_t(width-1u)) == 0ul);
-    uint draw_base;
-    if (args.push_mode == 0u) {
-        // IR3_PUSH_CONSTS_SHARED_PREAMBLE: direct shared register bank.
-        outpm4.d[0] = pkt4(args.shared_constant_register, 4u);
-        for(uint i=0u;i<4u;i++) outpm4.d[1u+i] = pc.d[i];
-        draw_base = 5u;
-    } else {
-        // IR3_PUSH_CONSTS_SHARED: CP_LOAD_STATE6, 3 control dwords, 4 constants.
-        outpm4.d[0] = pkt7(args.load_state6_opcode, 7u);
-        outpm4.d[1] = args.load_state6_control;
-        outpm4.d[2] = 0u; outpm4.d[3] = 0u;
-        for(uint i=0u;i<4u;i++) outpm4.d[4u+i] = pc.d[i];
-        draw_base = 8u;
-    }
-    outpm4.d[draw_base] = pkt4(args.vertex_offset_register, 2u);
-    outpm4.d[draw_base+1u] = draw.d[3]; // vertexOffset
-    outpm4.d[draw_base+2u] = draw.d[4]; // firstInstance
-    outpm4.d[draw_base+3u] = pkt7(0x38u, 7u);
-    outpm4.d[draw_base+4u] = is16 ? args.draw_initiator_u16 : args.draw_initiator_u32;
-    outpm4.d[draw_base+5u] = enabled ? draw.d[1] : 0u;
-    outpm4.d[draw_base+6u] = enabled ? draw.d[0] : 0u;
-    outpm4.d[draw_base+7u] = draw.d[2];
-    outpm4.d[draw_base+8u] = enabled ? ib.d[0] : 0u;
-    outpm4.d[draw_base+9u] = enabled ? ib.d[1] : 0u;
-    outpm4.d[draw_base+10u] = enabled ? ib.d[2] / width : 0u;
+    if (seq >= p.maximum_count) return;
 
-    // Each sequence occupies exactly 20 dwords.  The preamble encoding uses
-    // 16 dwords; fill the remainder with one valid NOP packet and 3 padding dwords.
-    if(args.push_mode == 0u) {
-        outpm4.d[16] = pkt7(0x10u, 3u); // CP_NOP
-        outpm4.d[17] = 0u; outpm4.d[18] = 0u; outpm4.d[19] = 0u;
+    uint count = p.sequence_count_address == 0ul ? p.maximum_count :
+        WordBuffer(p.sequence_count_address).data[0];
+    uint64_t base = p.indirect_address + uint64_t(seq) * uint64_t(p.indirect_stride);
+    WordBuffer ib = WordBuffer(base + p.index_token_offset);
+    WordBuffer pc = WordBuffer(base + p.constants_token_offset);
+    uint64_t draw_address = base + p.draw_token_offset;
+    WordBuffer outpm4 = WordBuffer(p.output_pm4_address + uint64_t(seq) * 80ul);
+
+    uint format = ib.data[3];
+    bool is16 = format == 57u; // DXGI_FORMAT_R16_UINT
+    bool is32 = format == 42u; // DXGI_FORMAT_R32_UINT
+    uint index_width = is16 ? 2u : 4u;
+    uint64_t index_va = uint64_t(ib.data[0]) | (uint64_t(ib.data[1]) << 32u);
+    bool live = seq < count && (is16 || is32) &&
+                ((index_va & uint64_t(index_width - 1u)) == 0ul);
+
+    uint at;
+    if (p.push_mode == 0u) {
+        // Per-pipeline IR3_PUSH_CONSTS_SHARED_PREAMBLE register bank.
+        outpm4.data[0] = pm4_pkt4(p.shared_constant_register, 4u);
+        for (uint i = 0u; i < 4u; ++i) outpm4.data[i + 1u] = pc.data[i];
+        at = 5u;
     } else {
-        outpm4.d[19] = pkt7(0x10u, 0u); // CP_NOP(0)
+        // IR3_PUSH_CONSTS_SHARED: CP_LOAD_STATE6 direct-to-constant bank.
+        outpm4.data[0] = pm4_pkt7(p.load_state6_opcode, 7u);
+        outpm4.data[1] = p.load_state6_control;
+        outpm4.data[2] = 0u;
+        outpm4.data[3] = 0u;
+        for (uint i = 0u; i < 4u; ++i) outpm4.data[i + 4u] = pc.data[i];
+        at = 8u;
     }
+
+    // CP_DRAW_INDIRECT_MULTI with indexed mode (9 DWORD payload).
+    // The CP reads VkDrawIndexedIndirectCommand (20 bytes) directly; unlike
+    // CP_DRAW_INDX_OFFSET this also applies VS driver parameters correctly.
+    outpm4.data[at] = pm4_pkt7(p.draw_packet_opcode, 9u);
+    outpm4.data[at + 1u] = is16 ? p.draw_initiator_u16 : p.draw_initiator_u32;
+    outpm4.data[at + 2u] = p.draw_opcode_and_vs_offset;
+    outpm4.data[at + 3u] = live ? 1u : 0u;
+    outpm4.data[at + 4u] = live ? ib.data[0] : 0u;
+    outpm4.data[at + 5u] = live ? ib.data[1] : 0u;
+    outpm4.data[at + 6u] = live ? (ib.data[2] / index_width) : 0u;
+    outpm4.data[at + 7u] = uint(draw_address);
+    outpm4.data[at + 8u] = uint(draw_address >> 32u);
+    outpm4.data[at + 9u] = 20u;
+
+    // PM4 parser must see valid commands through the entire 80-byte record.
+    uint tail = 20u - (at + 10u);
+    outpm4.data[at + 10u] = pm4_pkt7(0x10u, tail - 1u); // CP_NOP
+    for (uint i = at + 11u; i < 20u; ++i) outpm4.data[i] = 0u;
 }
