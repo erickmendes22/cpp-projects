@@ -108,8 +108,14 @@ jobs:
           test -s /tmp/turnip-control/lib/libvulkan_freedreno.so
           # A stripped installation library cannot expose hidden TU_GENX instances.
           # Check actual defined symbols in the pre-strip linked binary instead.
-          test -s mesa/build-android-aarch64/src/freedreno/vulkan/libvulkan_freedreno.so
-          "$NDK/llvm-readelf" -sW mesa/build-android-aarch64/src/freedreno/vulkan/libvulkan_freedreno.so > /tmp/a830-unstripped-symbols.txt
+          # This step has already run 'cd mesa'; do not prefix 'mesa/' again.
+          UNSTRIPPED=build-android-aarch64/src/freedreno/vulkan/libvulkan_freedreno.so
+          if [ ! -s "$UNSTRIPPED" ]; then
+            echo "ERROR: missing unstripped Turnip library at $(pwd)/$UNSTRIPPED"
+            find build-android-aarch64/src/freedreno/vulkan -maxdepth 1 -name '*.so' -print
+            exit 1
+          fi
+          "$NDK/llvm-readelf" -sW "$UNSTRIPPED" > /tmp/a830-unstripped-symbols.txt
 
       - name: Verify generated DGC driver entrypoints
         shell: bash
