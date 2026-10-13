@@ -52,6 +52,23 @@ void main() {
     uint seq = local_seq + p.first_sequence;
     WordBuffer outpm4 =
         WordBuffer(p.output_pm4_address + uint64_t(local_seq) * 80ul);
+    if (p.mode == 2u) {
+        // DGC compute dispatch: write VkDispatchIndirectCommand (3 DWORDs)
+        // and zero it for sequences outside the GPU-generated count.
+        uint count = p.sequence_count_address == 0ul ? p.maximum_count :
+            WordBuffer(p.sequence_count_address).data[0];
+        if (seq < count) {
+            WordBuffer dispatch_data = WordBuffer(p.indirect_address +
+                uint64_t(seq) * uint64_t(p.indirect_stride) + p.draw_token_offset);
+            for (uint i = 0u; i < 3u; ++i)
+                outpm4.data[i] = dispatch_data.data[i];
+        } else {
+            outpm4.data[0] = 0u;
+            outpm4.data[1] = 0u;
+            outpm4.data[2] = 0u;
+        }
+        return;
+    }
     if (p.mode == 1u) {
         // vkCmdExecuteGeneratedCommandsEXT with isPreprocessed=VK_TRUE:
         // copy the prepared commands into GPU-writable draw stream slots.
