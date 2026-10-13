@@ -21,6 +21,8 @@ jobs:
           /tmp/pm4_reference_test
           c++ -O2 -std=c++17 -Wall -Wextra -Werror control-resonant/dgc_pm4_layout_test.cpp -o /tmp/dgc_pm4_layout_test
           /tmp/dgc_pm4_layout_test
+          c++ -O2 -std=c++17 -Wall -Wextra -Werror control-resonant/dgc_pm4_modes_test.cpp -o /tmp/dgc_pm4_modes_test
+          /tmp/dgc_pm4_modes_test
       - name: Compile GPU reference to SPIR-V
         run: |
           glslangValidator -V --target-env vulkan1.2 -S comp control-resonant/indirect_pm4_reference.comp -o /tmp/control_pm4_reference.spv
