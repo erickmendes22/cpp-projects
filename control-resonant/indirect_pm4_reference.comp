@@ -1,0 +1,76 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_scalar_block_layout : require
+
+// GPU-side command-stream reference only.
+// This is NOT a complete Vulkan DGC implementation.
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430, buffer_reference_align = 4)
+buffer WordBuffer { uint words[]; };
+
+layout(push_constant, scalar) uniform Parameters {
+    uint64_t indirect_src;
+    uint64_t pm4_dst;
+    uint64_t sequence_count;
+    uint maximum_count;
+    uint input_stride;
+    uint shared_const_reg;
+    uint vertex_offset_reg;
+    uint draw_initiator16;
+    uint draw_initiator32;
+} p;
+
+uint parity(uint x) {
+    x ^= x >> 16;
+    x ^= x >> 8;
+    x ^= x >> 4;
+    return ((~0x6996u) >> (x & 15u)) & 1u;
+}
+
+uint pm4_pkt4(uint reg, uint count) {
+    return 0x40000000u | count | (parity(count) << 7)
+           | ((reg & 0x3ffffu) << 8) | (parity(reg) << 27);
+}
+
+uint pm4_pkt7(uint op, uint count) {
+    return 0x70000000u | count | (parity(count) << 15)
+           | ((op & 0x7fu) << 16) | (parity(op) << 23);
+}
+
+void main() {
+    uint seq = gl_GlobalInvocationID.x;
+    if (seq >= p.maximum_count) return;
+
+    WordBuffer src = WordBuffer(p.indirect_src + uint64_t(seq) * uint64_t(p.input_stride));
+    WordBuffer dst = WordBuffer(p.pm4_dst + uint64_t(seq) * 64ul);
+
+    uint format = src.words[3];
+    bool index16 = format == 57u; // DXGI_FORMAT_R16_UINT
+    bool index32 = format == 42u; // DXGI_FORMAT_R32_UINT
+    uint width = index16 ? 2u : 4u;
+    uint64_t addr = uint64_t(src.words[0]) | (uint64_t(src.words[1]) << 32);
+    uint count = p.sequence_count != 0ul ?
+        WordBuffer(p.sequence_count).words[0] : p.maximum_count;
+    bool live = seq < count && (index16 || index32) &&
+                (addr & uint64_t(width - 1u)) == 0ul;
+
+    // Four 32-bit constants. Register selection is pipeline-dependent.
+    dst.words[0] = pm4_pkt4(p.shared_const_reg, 4u);
+    for (uint i = 0u; i < 4u; i++) dst.words[1u + i] = src.words[4u + i];
+
+    // Vertex and instance offsets.
+    dst.words[5] = pm4_pkt4(p.vertex_offset_reg, 2u);
+    dst.words[6] = src.words[11]; // base vertex, signed bits
+    dst.words[7] = src.words[12]; // first instance
+
+    // CP_DRAW_INDX_OFFSET: 7 DWORD payloads
+    dst.words[8]  = pm4_pkt7(0x38u, 7u);
+    dst.words[9]  = index16 ? p.draw_initiator16 : p.draw_initiator32;
+    dst.words[10] = src.words[9];    // instance count
+    dst.words[11] = live ? src.words[8] : 0u;
+    dst.words[12] = src.words[10];   // first index
+    dst.words[13] = src.words[0];    // index VA low
+    dst.words[14] = src.words[1];    // index VA high
+    dst.words[15] = src.words[2] / width;
+}
