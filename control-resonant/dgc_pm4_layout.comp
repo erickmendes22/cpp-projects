@@ -28,6 +28,10 @@ layout(push_constant, scalar) uniform Parameters {
     uint load_state6_control;
     uint draw_packet_opcode;
     uint draw_opcode_and_vs_offset;
+    uint64_t preprocess_source_address;
+    uint first_sequence;
+    uint active_sequences;
+    uint mode;
 } p;
 
 uint parity(uint x) {
@@ -43,16 +47,27 @@ uint pm4_pkt7(uint op, uint count) {
            | ((op & 0x7fu) << 16u) | (parity(op) << 23u);
 }
 void main() {
-    uint seq = gl_GlobalInvocationID.x;
-    if (seq >= p.maximum_count) return;
-
+    uint local_seq = gl_GlobalInvocationID.x;
+    if (local_seq >= p.active_sequences) return;
+    uint seq = local_seq + p.first_sequence;
+    WordBuffer outpm4 =
+        WordBuffer(p.output_pm4_address + uint64_t(local_seq) * 80ul);
+    if (p.mode == 1u) {
+        // vkCmdExecuteGeneratedCommandsEXT with isPreprocessed=VK_TRUE:
+        // copy the prepared commands into GPU-writable draw stream slots.
+        WordBuffer prepared =
+            WordBuffer(p.preprocess_source_address + uint64_t(seq) * 80ul);
+        for (uint i = 0u; i < 20u; ++i)
+            outpm4.data[i] = prepared.data[i];
+        return;
+    }
     uint count = p.sequence_count_address == 0ul ? p.maximum_count :
         WordBuffer(p.sequence_count_address).data[0];
-    uint64_t base = p.indirect_address + uint64_t(seq) * uint64_t(p.indirect_stride);
+    uint64_t base = p.indirect_address +
+                    uint64_t(seq) * uint64_t(p.indirect_stride);
     WordBuffer ib = WordBuffer(base + p.index_token_offset);
     WordBuffer pc = WordBuffer(base + p.constants_token_offset);
     uint64_t draw_address = base + p.draw_token_offset;
-    WordBuffer outpm4 = WordBuffer(p.output_pm4_address + uint64_t(seq) * 80ul);
 
     uint format = ib.data[3];
     bool is16 = format == 57u; // DXGI_FORMAT_R16_UINT
