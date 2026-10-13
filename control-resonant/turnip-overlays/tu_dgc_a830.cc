@@ -5,6 +5,9 @@
  */
 #include "tu_dgc_a830.h"
 #include "tu_common.h"
+#include "tu_cmd_buffer.h"
+#include "tu_cs.h"
+#include "tu_shader.h"
 #include "vk_alloc.h"
 #include "vk_device.h"
 #include "vk_device_generated_commands.h"
@@ -156,4 +159,73 @@ tu_dgc_a830_finish(struct tu_device *device)
       vk->DestroyPipelineLayout(vdev, device->dgc_a830_pipeline_layout, nullptr);
    device->dgc_a830_pipeline = VK_NULL_HANDLE;
    device->dgc_a830_pipeline_layout = VK_NULL_HANDLE;
+}
+
+/* Preprocess a VkGeneratedCommandsInfoEXT stream into GPU-readable PM4.
+ * This is recorded into the command-buffer compute stream, not executed on
+ * the CPU. No Vulkan entrypoint advertises DGC until the draw path is wired.
+ */
+void
+tu_dgc_a830_generate(struct tu_cmd_buffer *cmd,
+                     const struct tu_dgc_a830_params *params)
+{
+   if (!params->maximum_count)
+      return;
+
+   VkResult result = tu_dgc_a830_init(cmd->device);
+   if (result != VK_SUCCESS) {
+      vk_command_buffer_set_error(&cmd->vk, result);
+      return;
+   }
+
+   VkCommandBuffer handle = tu_cmd_buffer_to_handle(cmd);
+   VkDevice vdev = tu_device_to_handle(cmd->device);
+   const struct vk_device_dispatch_table *vk =
+      &cmd->device->vk.dispatch_table;
+   struct tu_shader *old_compute_shader =
+      cmd->state.shaders[MESA_SHADER_COMPUTE];
+   const struct tu_draw_state old_compute_load =
+      cmd->state.compute_load_state;
+   const uint32_t old_dirty = cmd->state.dirty;
+   uint32_t old_push_constants[sizeof(*params)/sizeof(uint32_t)];
+   STATIC_ASSERT(sizeof(struct tu_dgc_a830_params) <= MAX_PUSH_CONSTANTS_SIZE);
+   memcpy(old_push_constants, cmd->push_constants, sizeof(old_push_constants));
+
+   vk->CmdBindPipeline(handle, VK_PIPELINE_BIND_POINT_COMPUTE,
+                       cmd->device->dgc_a830_pipeline);
+   vk->CmdPushConstants(handle, cmd->device->dgc_a830_pipeline_layout,
+                        VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                        sizeof(*params), params);
+   vk->CmdDispatch(handle, DIV_ROUND_UP(params->maximum_count, 64u), 1u, 1u);
+
+   // Restore CPU-tracked states.  The internal compute pipeline is not
+   // visible to the Vulkan application.
+   memcpy(cmd->push_constants, old_push_constants, sizeof(old_push_constants));
+   cmd->state.shaders[MESA_SHADER_COMPUTE] = old_compute_shader;
+   cmd->state.compute_load_state = old_compute_load;
+   cmd->state.dirty = old_dirty | TU_CMD_DIRTY_COMPUTE_DESC_SETS |
+                      TU_CMD_DIRTY_SHADER_CONSTS | TU_CMD_DIRTY_PROGRAM;
+
+   // The next compute shader launch must see the application's pipeline.
+   if (old_compute_shader)
+      tu_cs_emit_state_ib(&cmd->cs, old_compute_shader->state);
+
+   /* Synchronize compute writes before reading generated PM4 via CP.
+    * The Vulkan API call appears after CmdDispatch in the main stream.
+    * Higher-level renderpass dependencies still need separate validation.
+    */
+   VkMemoryBarrier2 memory_barrier = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+      .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+      .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+      .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+   };
+   VkDependencyInfo dependency = {
+      .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .memoryBarrierCount = 1,
+      .pMemoryBarriers = &memory_barrier,
+   };
+   vk->CmdPipelineBarrier2(handle, &dependency);
+   (void)vdev;
 }
