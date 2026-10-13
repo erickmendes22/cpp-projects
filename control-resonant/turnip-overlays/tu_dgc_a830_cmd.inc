@@ -202,7 +202,7 @@ tu_dgc_a830_execute_basic_draw(struct tu_cmd_buffer *cmd,
                    indexed ? (counted ? 11u : 9u) : (counted ? 8u : 6u));
    tu_cs_emit(cs, tu_draw_initiator(cmd,
                   indexed ? DI_SRC_SEL_DMA : DI_SRC_SEL_AUTO_INDEX));
-   const unsigned op=indexed
+   const enum a6xx_draw_indirect_opcode op=indexed
        ? (counted ? INDIRECT_OP_INDIRECT_COUNT_INDEXED : INDIRECT_OP_INDEXED)
        : (counted ? INDIRECT_OP_INDIRECT_COUNT : INDIRECT_OP_NORMAL);
    tu_cs_emit(cs, A6XX_CP_DRAW_INDIRECT_MULTI_1_OPCODE(op) |
