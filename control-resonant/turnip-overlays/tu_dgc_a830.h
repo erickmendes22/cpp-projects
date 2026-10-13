@@ -39,4 +39,6 @@ static_assert(sizeof(tu_dgc_a830_params) == 104, "scalar GLSL push layout");
 
 VkResult tu_dgc_a830_init(struct tu_device *device);
 void tu_dgc_a830_finish(struct tu_device *device);
+void tu_dgc_a830_generate(struct tu_cmd_buffer *cmd,
+                           const struct tu_dgc_a830_params *params);
 #endif
