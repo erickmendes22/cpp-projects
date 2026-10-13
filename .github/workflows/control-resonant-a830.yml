@@ -1,0 +1,27 @@
+name: CONTROL Resonant A830 - preliminary shader validation
+
+on:
+  push:
+    branches: [control-resonant-dgc-a830]
+    paths:
+      - "control-resonant/**"
+      - ".github/workflows/control-resonant-a830.yml"
+  workflow_dispatch:
+
+jobs:
+  validate-indirect-encoding:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SPIR-V tools
+        run: sudo apt-get update && sudo apt-get install -y glslang-tools spirv-tools
+      - name: Compile and execute CPU reference
+        run: |
+          c++ -O2 -std=c++17 -Wall -Wextra -Werror control-resonant/pm4_reference_test.cpp -o /tmp/pm4_reference_test
+          /tmp/pm4_reference_test
+      - name: Compile GPU reference to SPIR-V
+        run: |
+          glslangValidator -V --target-env vulkan1.2 -S comp control-resonant/indirect_pm4_reference.comp -o /tmp/control_pm4_reference.spv
+          spirv-val --target-env vulkan1.2 /tmp/control_pm4_reference.spv
+
+# Deliberately no driver ZIP packaging: the Vulkan DGC implementation is not integrated yet.
