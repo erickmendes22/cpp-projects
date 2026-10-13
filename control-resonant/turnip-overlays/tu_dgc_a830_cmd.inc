@@ -158,6 +158,19 @@ tu_dgc_a830_record(struct tu_cmd_buffer *cmd,
       vk_command_buffer_set_error(&cmd->vk, result);
 }
 
+/* A standalone mesh draw DGC token can use the A8xx native mesh
+ * indirect path.  The mesh emulation's existing compute setup supports
+ * dynamic sequence counts, so no graphics functionality is disabled.
+ */
+static bool
+tu_dgc_a830_mesh_layout(const struct tu_dgc_layout *layout)
+{
+   const struct vk_indirect_command_layout *l = &layout->vk;
+   return l->dgc_info == BITFIELD_BIT(MESA_VK_DGC_DRAW_MESH) &&
+          l->draw_src_offset_B <= l->stride &&
+          l->stride - l->draw_src_offset_B >= 12u;
+}
+
 template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_CmdPreprocessGeneratedCommandsEXT(
@@ -167,7 +180,14 @@ tu_CmdPreprocessGeneratedCommandsEXT(
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    VK_FROM_HANDLE(tu_cmd_buffer, state, stateCommandBuffer);
-   if (!generated || !generated->preprocessAddress ||
+   if (!generated) {
+      vk_command_buffer_set_error(&cmd->vk, VK_ERROR_FEATURE_NOT_PRESENT);
+      return;
+   }
+   VK_FROM_HANDLE(tu_dgc_layout, dgc_layout, generated->indirectCommandsLayout);
+   if (dgc_layout && tu_dgc_a830_mesh_layout(dgc_layout))
+      return; // Mesh path consumes the indirect stream without a PM4 intermediate.
+   if (!generated->preprocessAddress ||
        generated->preprocessSize < (uint64_t)generated->maxSequenceCount * 80) {
       vk_command_buffer_set_error(&cmd->vk, VK_ERROR_FEATURE_NOT_PRESENT);
       return;
@@ -192,6 +212,17 @@ tu_CmdExecuteGeneratedCommandsEXT(
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    VK_FROM_HANDLE(tu_dgc_layout, layout, generated->indirectCommandsLayout);
+   if (layout && tu_dgc_a830_mesh_layout(layout)) {
+      struct tu_mesh_draw mesh = {
+         .indirect = generated->indirectAddress + layout->vk.draw_src_offset_B,
+         .count = generated->sequenceCountAddress,
+         .draw_count = generated->maxSequenceCount,
+         .stride = (uint32_t)layout->vk.stride,
+      };
+      if (mesh.draw_count)
+         tu_mesh_draw<CHIP>(cmd, &mesh);
+      return;
+   }
    if (!layout || !tu_dgc_a830_supported_layout(layout) ||
        !cmd->state.pass) {
       vk_command_buffer_set_error(&cmd->vk, VK_ERROR_FEATURE_NOT_PRESENT);
