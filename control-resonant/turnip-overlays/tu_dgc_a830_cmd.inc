@@ -172,6 +172,55 @@ tu_dgc_a830_mesh_layout(const struct tu_dgc_layout *layout)
 }
 
 static bool
+tu_dgc_a830_basic_draw_layout(const struct tu_dgc_layout *layout)
+{
+   const struct vk_indirect_command_layout *l=&layout->vk;
+   const bool indexed=l->dgc_info == BITFIELD_BIT(MESA_VK_DGC_DRAW_INDEXED);
+   const bool basic=l->dgc_info == BITFIELD_BIT(MESA_VK_DGC_DRAW);
+   if (!(indexed || basic) || l->stride>2048u) return false;
+   const uint32_t size=indexed?20u:16u;
+   return l->stride>=size && l->draw_src_offset_B<=l->stride-size;
+}
+
+template <chip CHIP>
+static void
+tu_dgc_a830_execute_basic_draw(struct tu_cmd_buffer *cmd,
+                                const VkGeneratedCommandsInfoEXT *generated,
+                                const struct tu_dgc_layout *layout)
+{
+   const bool indexed = layout->vk.dgc_info ==
+                        BITFIELD_BIT(MESA_VK_DGC_DRAW_INDEXED);
+   struct tu_cs *cs=&cmd->draw_cs;
+   tu6_emit_empty_vs_params<CHIP>(cmd);
+   if (generated->sequenceCountAddress ||
+       cmd->device->physical_device->info->props.indirect_draw_wfm_quirk)
+      draw_wfm(cmd);
+   tu6_draw_common<CHIP>(cmd, cs, indexed, 0u);
+
+   const bool counted=generated->sequenceCountAddress != 0;
+   tu_cs_emit_pkt7(cs, CP_DRAW_INDIRECT_MULTI,
+                   indexed ? (counted ? 11u : 9u) : (counted ? 8u : 6u));
+   tu_cs_emit(cs, tu_draw_initiator(cmd,
+                  indexed ? DI_SRC_SEL_DMA : DI_SRC_SEL_AUTO_INDEX));
+   const unsigned op=indexed
+       ? (counted ? INDIRECT_OP_INDIRECT_COUNT_INDEXED : INDIRECT_OP_INDEXED)
+       : (counted ? INDIRECT_OP_INDIRECT_COUNT : INDIRECT_OP_NORMAL);
+   tu_cs_emit(cs, A6XX_CP_DRAW_INDIRECT_MULTI_1_OPCODE(op) |
+                  A6XX_CP_DRAW_INDIRECT_MULTI_1_DST_OFF(vs_params_offset(cmd)));
+   tu_cs_emit(cs, generated->maxSequenceCount);
+   if (indexed) {
+      tu_cs_emit_qw(cs, cmd->state.index_va);
+      tu_cs_emit(cs, cmd->state.max_index_count);
+   }
+   tu_cs_emit_qw(cs, generated->indirectAddress+
+                        layout->vk.draw_src_offset_B);
+   if (counted)
+      tu_cs_emit_qw(cs, generated->sequenceCountAddress);
+   tu_cs_emit(cs, (uint32_t)layout->vk.stride);
+   trace_end_draw(&cmd->rp_trace, cs);
+}
+
+static bool
 tu_dgc_a830_dispatch_layout(const struct tu_dgc_layout *layout)
 {
    const struct vk_indirect_command_layout *l = &layout->vk;
@@ -227,8 +276,9 @@ tu_CmdPreprocessGeneratedCommandsEXT(
       return;
    }
    VK_FROM_HANDLE(tu_dgc_layout, dgc_layout, generated->indirectCommandsLayout);
-   if (dgc_layout && tu_dgc_a830_mesh_layout(dgc_layout))
-      return; // Mesh path consumes the indirect stream without a PM4 intermediate.
+   if (dgc_layout && (tu_dgc_a830_mesh_layout(dgc_layout) ||
+                      tu_dgc_a830_basic_draw_layout(dgc_layout)))
+      return; // Native indirect paths need no PM4 preprocessing.
    if (dgc_layout && tu_dgc_a830_dispatch_layout(dgc_layout)) {
       tu_dgc_a830_preprocess_dispatch<CHIP>(cmd,generated,dgc_layout);
       return;
@@ -258,6 +308,10 @@ tu_CmdExecuteGeneratedCommandsEXT(
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    VK_FROM_HANDLE(tu_dgc_layout, layout, generated->indirectCommandsLayout);
+   if (layout && tu_dgc_a830_basic_draw_layout(layout)) {
+      tu_dgc_a830_execute_basic_draw<CHIP>(cmd,generated,layout);
+      return;
+   }
    if (layout && tu_dgc_a830_dispatch_layout(layout)) {
       if (!isPreprocessed)
          tu_dgc_a830_preprocess_dispatch<CHIP>(cmd,generated,layout);
