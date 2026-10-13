@@ -37,6 +37,7 @@ jobs:
           set -euo pipefail
           cp control-resonant/turnip-overlays/tu_dgc_a830.{h,cc} mesa/src/freedreno/vulkan/
           cp control-resonant/turnip-overlays/tu_dgc_bridge.c mesa/src/freedreno/vulkan/
+          cp control-resonant/turnip-overlays/tu_dgc_a830_cmd.inc mesa/src/freedreno/vulkan/
           glslangValidator -V --target-env vulkan1.2 -S comp control-resonant/dgc_pm4_layout.comp -o /tmp/tu_dgc_a830.spv
           spirv-val --target-env vulkan1.2 /tmp/tu_dgc_a830.spv
           python3 - <<'PY'
