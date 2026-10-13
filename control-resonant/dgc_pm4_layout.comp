@@ -21,6 +21,9 @@ layout(push_constant, scalar) uniform Args {
     uint vertex_offset_register;
     uint draw_initiator_u16;
     uint draw_initiator_u32;
+    uint push_mode;
+    uint load_state6_opcode;
+    uint load_state6_control;
 } args;
 uint parity(uint v) {
     v ^= v >> 16; v ^= v >> 8; v ^= v >> 4;
@@ -44,24 +47,45 @@ void main() {
     Words ib = Words(base + args.index_token_offset);
     Words pc = Words(base + args.constants_token_offset);
     Words draw = Words(base + args.draw_token_offset);
-    Words outpm4 = Words(args.output_pm4_address + uint64_t(seq)*64ul);
+    Words outpm4 = Words(args.output_pm4_address + uint64_t(seq)*80ul);
     uint format = ib.d[3];
     bool is16 = format == 57u;
     bool is32 = format == 42u;
     uint width = is16 ? 2u : 4u;
     uint64_t index_va = uint64_t(ib.d[0]) | (uint64_t(ib.d[1]) << 32);
     enabled = enabled && (is16 || is32) && ((index_va & uint64_t(width-1u)) == 0ul);
-    outpm4.d[0] = pkt4(args.shared_constant_register, 4u);
-    for (uint i=0u;i<4u;++i) outpm4.d[1u+i] = pc.d[i];
-    outpm4.d[5] = pkt4(args.vertex_offset_register, 2u);
-    outpm4.d[6] = draw.d[3]; // vertexOffset
-    outpm4.d[7] = draw.d[4]; // firstInstance
-    outpm4.d[8] = pkt7(0x38u, 7u);
-    outpm4.d[9] = is16 ? args.draw_initiator_u16 : args.draw_initiator_u32;
-    outpm4.d[10] = enabled ? draw.d[1] : 0u;
-    outpm4.d[11] = enabled ? draw.d[0] : 0u;
-    outpm4.d[12] = draw.d[2];
-    outpm4.d[13] = enabled ? ib.d[0] : 0u;
-    outpm4.d[14] = enabled ? ib.d[1] : 0u;
-    outpm4.d[15] = enabled ? ib.d[2] / width : 0u;
+    uint draw_base;
+    if (args.push_mode == 0u) {
+        // IR3_PUSH_CONSTS_SHARED_PREAMBLE: direct shared register bank.
+        outpm4.d[0] = pkt4(args.shared_constant_register, 4u);
+        for(uint i=0u;i<4u;i++) outpm4.d[1u+i] = pc.d[i];
+        draw_base = 5u;
+    } else {
+        // IR3_PUSH_CONSTS_SHARED: CP_LOAD_STATE6, 3 control dwords, 4 constants.
+        outpm4.d[0] = pkt7(args.load_state6_opcode, 7u);
+        outpm4.d[1] = args.load_state6_control;
+        outpm4.d[2] = 0u; outpm4.d[3] = 0u;
+        for(uint i=0u;i<4u;i++) outpm4.d[4u+i] = pc.d[i];
+        draw_base = 8u;
+    }
+    outpm4.d[draw_base] = pkt4(args.vertex_offset_register, 2u);
+    outpm4.d[draw_base+1u] = draw.d[3]; // vertexOffset
+    outpm4.d[draw_base+2u] = draw.d[4]; // firstInstance
+    outpm4.d[draw_base+3u] = pkt7(0x38u, 7u);
+    outpm4.d[draw_base+4u] = is16 ? args.draw_initiator_u16 : args.draw_initiator_u32;
+    outpm4.d[draw_base+5u] = enabled ? draw.d[1] : 0u;
+    outpm4.d[draw_base+6u] = enabled ? draw.d[0] : 0u;
+    outpm4.d[draw_base+7u] = draw.d[2];
+    outpm4.d[draw_base+8u] = enabled ? ib.d[0] : 0u;
+    outpm4.d[draw_base+9u] = enabled ? ib.d[1] : 0u;
+    outpm4.d[draw_base+10u] = enabled ? ib.d[2] / width : 0u;
+
+    // Each sequence occupies exactly 20 dwords.  The preamble encoding uses
+    // 16 dwords; fill the remainder with one valid NOP packet and 3 padding dwords.
+    if(args.push_mode == 0u) {
+        outpm4.d[16] = pkt7(0x10u, 3u); // CP_NOP
+        outpm4.d[17] = 0u; outpm4.d[18] = 0u; outpm4.d[19] = 0u;
+    } else {
+        outpm4.d[19] = pkt7(0x10u, 0u); // CP_NOP(0)
+    }
 }
