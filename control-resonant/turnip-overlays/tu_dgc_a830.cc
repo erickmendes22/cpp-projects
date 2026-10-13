@@ -87,6 +87,10 @@ tu_dgc_a830_init(struct tu_device *device)
    VkShaderModule module = VK_NULL_HANDLE;
    VkPipelineLayout layout = VK_NULL_HANDLE;
    VkPipeline pipeline = VK_NULL_HANDLE;
+   VkPushConstantRange range = {};
+   VkPipelineLayoutCreateInfo layout_info = {};
+   VkComputePipelineCreateInfo pipeline_info = {};
+
    VkShaderModuleCreateInfo module_info = {
       .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
       .codeSize = sizeof(tu_dgc_a830_spv),
@@ -96,30 +100,22 @@ tu_dgc_a830_init(struct tu_device *device)
    if (result != VK_SUCCESS)
       goto done;
 
-   VkPushConstantRange range = {
-      .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-      .offset = 0,
-      .size = sizeof(struct tu_dgc_a830_params),
-   };
-   VkPipelineLayoutCreateInfo layout_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-      .pushConstantRangeCount = 1,
-      .pPushConstantRanges = &range,
-   };
+   range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+   range.offset = 0;
+   range.size = sizeof(struct tu_dgc_a830_params);
+   layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+   layout_info.pushConstantRangeCount = 1;
+   layout_info.pPushConstantRanges = &range;
    result = vk->CreatePipelineLayout(vdev, &layout_info, nullptr, &layout);
    if (result != VK_SUCCESS)
       goto done;
 
-   VkComputePipelineCreateInfo pipeline_info = {
-      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-      .stage = {
-         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-         .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-         .module = module,
-         .pName = "main",
-      },
-      .layout = layout,
-   };
+   pipeline_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+   pipeline_info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+   pipeline_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+   pipeline_info.stage.module = module;
+   pipeline_info.stage.pName = "main";
+   pipeline_info.layout = layout;
    result = vk->CreateComputePipelines(vdev, VK_NULL_HANDLE, 1,
                                        &pipeline_info, nullptr, &pipeline);
    if (result == VK_SUCCESS) {
