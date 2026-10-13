@@ -1,6 +1,11 @@
 name: CONTROL Resonant A830 - Turnip DGC integration compile
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - control-resonant-dgc-a830
+    paths:
+      - .github/workflows/control-resonant-turnip.yml
 
 concurrency:
   group: control-resonant-${{ github.workflow }}-${{ github.ref }}
