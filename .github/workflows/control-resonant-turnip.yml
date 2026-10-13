@@ -40,6 +40,34 @@ jobs:
           assert needle in s
           s=s.replace(needle,needle+"\n  'tu_dgc_a830.cc',\n  'tu_dgc_bridge.c',",1)
           f.write_text(s)
+          device_header=Path("mesa/src/freedreno/vulkan/tu_device.h")
+          s=device_header.read_text()
+          key="struct tu_device\n{\n   struct vk_device vk;"
+          assert key in s
+          s=s.replace(key, key+"\n   VkPipeline dgc_a830_pipeline;\n   VkPipelineLayout dgc_a830_pipeline_layout;",1)
+          device_header.write_text(s)
+          dev=Path("mesa/src/freedreno/vulkan/tu_device.cc")
+          s=dev.read_text()
+          s='#include "tu_dgc_a830.h"\n'+s
+          assert "   tu_destroy_clear_blit_shaders(device);" in s
+          s=s.replace("   tu_destroy_clear_blit_shaders(device);",
+                      "   tu_dgc_a830_finish(device);\n   tu_destroy_clear_blit_shaders(device);",1)
+          dev.write_text(s)
+          PY
+          glslangValidator -V --target-env vulkan1.2 -S comp \
+            control-resonant/dgc_pm4_layout.comp -o /tmp/tu_dgc_a830.spv
+          spirv-val --target-env vulkan1.2 /tmp/tu_dgc_a830.spv
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          data=Path("/tmp/tu_dgc_a830.spv").read_bytes()
+          assert len(data)%4 == 0
+          words=struct.unpack("<%dI"%(len(data)//4), data)
+          out=Path("mesa/src/freedreno/vulkan/tu_dgc_a830_spv.h")
+          out.write_text("#pragma once\n#include <stdint.h>\nstatic const uint32_t tu_dgc_a830_spv[] = {\n"+
+              "\n".join("  "+", ".join("0x%08xu"%v for v in words[i:i+8])+","
+                        for i in range(0,len(words),8))+"\n};\n")
+          print("Embedded",len(data),"bytes SPIR-V for A830 DGC")
           PY
       - name: Fetch Android NDK
         run: |
