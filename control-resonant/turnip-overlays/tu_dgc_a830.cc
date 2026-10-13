@@ -45,10 +45,10 @@ tu_GetGeneratedCommandsMemoryRequirementsEXT(
 {
    VK_FROM_HANDLE(tu_device, device, _device);
    VK_FROM_HANDLE(tu_dgc_layout, layout, pInfo->indirectCommandsLayout);
-   /* Reserved PM4 stream for fixed-layout indexed draws: 64 B per command.
+   /* Reserved PM4 stream for fixed-layout indexed draws: 80 B per command.
     * The future dispatcher must not emit more words than this.
     */
-   const uint64_t cmd_size = (uint64_t)pInfo->maxSequenceCount * 64u;
+   const uint64_t cmd_size = (uint64_t)pInfo->maxSequenceCount * 80u;
    const uint32_t count = device->physical_device->memory.type_count;
    pRequirements->memoryRequirements.size = align64(cmd_size, 256u);
    pRequirements->memoryRequirements.alignment = 256u;
