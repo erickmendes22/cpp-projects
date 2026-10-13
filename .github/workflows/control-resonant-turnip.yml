@@ -51,8 +51,8 @@ jobs:
           cat > mesa/android-aarch64.txt <<EOF
           [binaries]
           ar = '$NDK/llvm-ar'
-          c = ['$NDK/aarch64-linux-android36-clang']
-          cpp = ['$NDK/aarch64-linux-android36-clang++', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-static-libstdc++']
+          c = ['$NDK/clang', '--target=aarch64-linux-android35']
+          cpp = ['$NDK/clang++', '--target=aarch64-linux-android35', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-static-libstdc++']
           c_ld = '$NDK/ld.lld'
           cpp_ld = '$NDK/ld.lld'
           strip = '$NDK/llvm-strip'
