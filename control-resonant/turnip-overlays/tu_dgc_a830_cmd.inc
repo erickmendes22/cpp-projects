@@ -108,10 +108,14 @@ tu_dgc_a830_record_dispatch(struct tu_cmd_buffer *cmd,
    cmd->state.dirty |= TU_CMD_DIRTY_SHADER_CONSTS |
                        TU_CMD_DIRTY_COMPUTE_DESC_SETS;
 
-   /* Synchronize shader writes before the CP fetches generated command words. */
-   tu_cs_emit_pkt7(&cmd->cs, CP_WAIT_MEM_WRITES, 0);
+   /* Shader -> Command Processor synchronization.  Match the A8xx mesh
+    * emulation barrier: CP_WAIT_MEM_WRITES by itself only orders CP writes;
+    * compute L1/L2 storage writes must be CLEANED before CP can fetch PM4. */
+   tu_cs_emit_wfi(&cmd->cs);
+   tu_emit_event_write<CHIP>(cmd, &cmd->cs, FD_CACHE_CLEAN);
    tu_emit_event_write<CHIP>(cmd, &cmd->cs, FD_CACHE_INVALIDATE);
    tu_cs_emit_wfi(&cmd->cs);
+   tu_cs_emit_pkt7(&cmd->cs, CP_WAIT_FOR_ME, 0);
    return tu_cs_get_status(&cmd->cs);
 }
 
