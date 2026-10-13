@@ -65,3 +65,86 @@ tu_GetGeneratedCommandsMemoryRequirementsEXT(
       count >= 32 ? UINT32_MAX : ((1u << count) - 1u);
    (void)layout;
 }
+
+/* Compiled from dgc_pm4_layout.comp in the Android builder. */
+#include "tu_dgc_a830_spv.h"
+
+VkResult
+tu_dgc_a830_init(struct tu_device *device)
+{
+   if (device->dgc_a830_pipeline)
+      return VK_SUCCESS;
+
+   mtx_lock(&device->mutex);
+   if (device->dgc_a830_pipeline) {
+      mtx_unlock(&device->mutex);
+      return VK_SUCCESS;
+   }
+
+   VkDevice vdev = tu_device_to_handle(device);
+   const struct vk_device_dispatch_table *vk = &device->vk.dispatch_table;
+
+   VkShaderModule module = VK_NULL_HANDLE;
+   VkPipelineLayout layout = VK_NULL_HANDLE;
+   VkPipeline pipeline = VK_NULL_HANDLE;
+   VkShaderModuleCreateInfo module_info = {
+      .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+      .codeSize = sizeof(tu_dgc_a830_spv),
+      .pCode = tu_dgc_a830_spv,
+   };
+   VkResult result = vk->CreateShaderModule(vdev, &module_info, nullptr, &module);
+   if (result != VK_SUCCESS)
+      goto done;
+
+   VkPushConstantRange range = {
+      .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+      .offset = 0,
+      .size = sizeof(struct tu_dgc_a830_params),
+   };
+   VkPipelineLayoutCreateInfo layout_info = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+      .pushConstantRangeCount = 1,
+      .pPushConstantRanges = &range,
+   };
+   result = vk->CreatePipelineLayout(vdev, &layout_info, nullptr, &layout);
+   if (result != VK_SUCCESS)
+      goto done;
+
+   VkComputePipelineCreateInfo pipeline_info = {
+      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .stage = {
+         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+         .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+         .module = module,
+         .pName = "main",
+      },
+      .layout = layout,
+   };
+   result = vk->CreateComputePipelines(vdev, VK_NULL_HANDLE, 1,
+                                       &pipeline_info, nullptr, &pipeline);
+   if (result == VK_SUCCESS) {
+      device->dgc_a830_pipeline = pipeline;
+      device->dgc_a830_pipeline_layout = layout;
+   }
+
+done:
+   if (module)
+      vk->DestroyShaderModule(vdev, module, nullptr);
+   if (result != VK_SUCCESS && layout)
+      vk->DestroyPipelineLayout(vdev, layout, nullptr);
+   mtx_unlock(&device->mutex);
+   return result;
+}
+
+void
+tu_dgc_a830_finish(struct tu_device *device)
+{
+   VkDevice vdev = tu_device_to_handle(device);
+   const struct vk_device_dispatch_table *vk = &device->vk.dispatch_table;
+   if (device->dgc_a830_pipeline)
+      vk->DestroyPipeline(vdev, device->dgc_a830_pipeline, nullptr);
+   if (device->dgc_a830_pipeline_layout)
+      vk->DestroyPipelineLayout(vdev, device->dgc_a830_pipeline_layout, nullptr);
+   device->dgc_a830_pipeline = VK_NULL_HANDLE;
+   device->dgc_a830_pipeline_layout = VK_NULL_HANDLE;
+}
