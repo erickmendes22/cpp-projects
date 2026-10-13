@@ -19,6 +19,10 @@ tu_dgc_a830_supported_layout(const struct tu_dgc_layout *layout)
           l->pc_layouts[0].size_B == 16 &&
           l->pc_layouts[0].dst_offset_B % 4 == 0 &&
           l->index_mode_is_dx && l->stride >= 52 &&
+          l->stride <= 2048 &&
+          l->index_src_offset_B <= l->stride - 16 &&
+          l->pc_layouts[0].src_offset_B <= l->stride - 16 &&
+          l->draw_src_offset_B <= l->stride - 20 &&
           !(l->usage & VK_INDIRECT_COMMANDS_LAYOUT_USAGE_UNORDERED_SEQUENCES_BIT_EXT);
 }
 
