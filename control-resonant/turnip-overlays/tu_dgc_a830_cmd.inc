@@ -171,6 +171,48 @@ tu_dgc_a830_mesh_layout(const struct tu_dgc_layout *layout)
           l->stride - l->draw_src_offset_B >= 12u;
 }
 
+static bool
+tu_dgc_a830_dispatch_layout(const struct tu_dgc_layout *layout)
+{
+   const struct vk_indirect_command_layout *l = &layout->vk;
+   return l->dgc_info == BITFIELD_BIT(MESA_VK_DGC_DISPATCH) &&
+          l->stride >= 12u && l->stride <= 2048u &&
+          l->dispatch_src_offset_B <= l->stride - 12u;
+}
+
+template <chip CHIP>
+static void
+tu_dgc_a830_preprocess_dispatch(struct tu_cmd_buffer *cmd,
+                                const VkGeneratedCommandsInfoEXT *generated,
+                                const struct tu_dgc_layout *layout)
+{
+   if (!generated->preprocessAddress ||
+       generated->preprocessSize < (uint64_t)generated->maxSequenceCount * 80u ||
+       generated->maxSequenceCount > 4096u) {
+      vk_command_buffer_set_error(&cmd->vk, VK_ERROR_FEATURE_NOT_PRESENT);
+      return;
+   }
+   for (uint32_t start=0;start<generated->maxSequenceCount;) {
+      uint32_t n=MIN2(512u, generated->maxSequenceCount-start);
+      struct tu_dgc_a830_params params = {};
+      params.indirect_address=generated->indirectAddress;
+      params.sequence_count_address=generated->sequenceCountAddress;
+      params.output_pm4_address=generated->preprocessAddress+(uint64_t)start*80u;
+      params.maximum_count=generated->maxSequenceCount;
+      params.indirect_stride=layout->vk.stride;
+      params.draw_token_offset=layout->vk.dispatch_src_offset_B;
+      params.first_sequence=start;
+      params.active_sequences=n;
+      params.mode=2u;
+      VkResult err=tu_dgc_a830_record_dispatch<CHIP>(cmd,&params);
+      if(err!=VK_SUCCESS) {
+         vk_command_buffer_set_error(&cmd->vk,err);
+         return;
+      }
+      start+=n;
+   }
+}
+
 template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_CmdPreprocessGeneratedCommandsEXT(
@@ -187,6 +229,10 @@ tu_CmdPreprocessGeneratedCommandsEXT(
    VK_FROM_HANDLE(tu_dgc_layout, dgc_layout, generated->indirectCommandsLayout);
    if (dgc_layout && tu_dgc_a830_mesh_layout(dgc_layout))
       return; // Mesh path consumes the indirect stream without a PM4 intermediate.
+   if (dgc_layout && tu_dgc_a830_dispatch_layout(dgc_layout)) {
+      tu_dgc_a830_preprocess_dispatch<CHIP>(cmd,generated,dgc_layout);
+      return;
+   }
    if (!generated->preprocessAddress ||
        generated->preprocessSize < (uint64_t)generated->maxSequenceCount * 80) {
       vk_command_buffer_set_error(&cmd->vk, VK_ERROR_FEATURE_NOT_PRESENT);
@@ -212,6 +258,18 @@ tu_CmdExecuteGeneratedCommandsEXT(
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    VK_FROM_HANDLE(tu_dgc_layout, layout, generated->indirectCommandsLayout);
+   if (layout && tu_dgc_a830_dispatch_layout(layout)) {
+      if (!isPreprocessed)
+         tu_dgc_a830_preprocess_dispatch<CHIP>(cmd,generated,layout);
+      if (tu_cs_get_status(&cmd->cs) != VK_SUCCESS)
+         return;
+      for (uint32_t i=0;i<generated->maxSequenceCount;++i) {
+         struct tu_dispatch_info d = {};
+         d.indirect=generated->preprocessAddress+(uint64_t)i*80u;
+         tu_dispatch<CHIP>(cmd,&d);
+      }
+      return;
+   }
    if (layout && tu_dgc_a830_mesh_layout(layout)) {
       struct tu_mesh_draw mesh = {
          .indirect = generated->indirectAddress + layout->vk.draw_src_offset_B,
