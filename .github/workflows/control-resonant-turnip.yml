@@ -18,8 +18,19 @@ jobs:
           sudo apt-get install -y ninja-build clang lld patchelf flex bison glslang-tools spirv-tools git python3-pip pkg-config ccache unzip curl libdrm-dev zip
           python3 -m pip install --user --break-system-packages 'meson>=1.4' mako
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Mesa A830 source
-        run: git clone --depth=1 --branch turnip/gen8 https://github.com/whitebelyash/mesa-unified.git mesa
+      - name: Mesa A830 source and full feature patches
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch main https://gitlab.freedesktop.org/mesa/mesa.git mesa
+          git -C mesa fetch --depth=1 origin 4da08cb8adfbdc103bc517b45040a19957b7404d
+          git -C mesa checkout --detach FETCH_HEAD
+          cd mesa
+          for p in ../control-resonant/a830-compat/*.patch; do
+            patch -p1 -N --fuzz=3 --no-backup-if-mismatch < "$p"
+          done
+          test -s src/freedreno/vulkan/tu_mesh.cc
+          grep -q 'tu_mesh.cc' src/freedreno/vulkan/meson.build
+          grep -q 'EXT_mesh_shader = tu_has_mesh_shader(device)' src/freedreno/vulkan/tu_device.cc
       - name: Inject Vulkan DGC prototype
         shell: bash
         run: |
