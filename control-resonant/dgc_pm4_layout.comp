@@ -63,6 +63,13 @@ void main() {
     }
     uint count = p.sequence_count_address == 0ul ? p.maximum_count :
         WordBuffer(p.sequence_count_address).data[0];
+    if (seq >= count) {
+        // Entries above the GPU-computed count are uninitialized application
+        // memory. Never fetch their tokens, and do not alter draw state.
+        outpm4.data[0] = pm4_pkt7(0x10u, 19u);
+        for (uint i = 1u; i < 20u; ++i) outpm4.data[i] = 0u;
+        return;
+    }
     uint64_t base = p.indirect_address +
                     uint64_t(seq) * uint64_t(p.indirect_stride);
     WordBuffer ib = WordBuffer(base + p.index_token_offset);
