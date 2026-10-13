@@ -31,13 +31,14 @@ jobs:
         run: |
           set -euo pipefail
           cp control-resonant/turnip-overlays/tu_dgc_a830.{h,cc} mesa/src/freedreno/vulkan/
+          cp control-resonant/turnip-overlays/tu_dgc_bridge.c mesa/src/freedreno/vulkan/
           python3 - <<'PY'
           from pathlib import Path
           f=Path("mesa/src/freedreno/vulkan/meson.build")
           s=f.read_text()
           needle="  'tu_device.cc',"
           assert needle in s
-          s=s.replace(needle,needle+"\n  'tu_dgc_a830.cc',",1)
+          s=s.replace(needle,needle+"\n  'tu_dgc_a830.cc',\n  'tu_dgc_bridge.c',",1)
           f.write_text(s)
           PY
       - name: Fetch Android NDK
