@@ -3,7 +3,9 @@
  */
 #ifndef TU_DGC_A830_H
 #define TU_DGC_A830_H
+extern "C" {
 #include "vk_device_generated_commands.h"
+}
 #include "tu_device.h"
 
 struct tu_dgc_layout {
