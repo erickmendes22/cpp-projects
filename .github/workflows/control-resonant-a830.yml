@@ -19,9 +19,13 @@ jobs:
         run: |
           c++ -O2 -std=c++17 -Wall -Wextra -Werror control-resonant/pm4_reference_test.cpp -o /tmp/pm4_reference_test
           /tmp/pm4_reference_test
+          c++ -O2 -std=c++17 -Wall -Wextra -Werror control-resonant/dgc_pm4_layout_test.cpp -o /tmp/dgc_pm4_layout_test
+          /tmp/dgc_pm4_layout_test
       - name: Compile GPU reference to SPIR-V
         run: |
           glslangValidator -V --target-env vulkan1.2 -S comp control-resonant/indirect_pm4_reference.comp -o /tmp/control_pm4_reference.spv
           spirv-val --target-env vulkan1.2 /tmp/control_pm4_reference.spv
+          glslangValidator -V --target-env vulkan1.2 -S comp control-resonant/dgc_pm4_layout.comp -o /tmp/dgc_pm4_layout.spv
+          spirv-val --target-env vulkan1.2 /tmp/dgc_pm4_layout.spv
 
 # Deliberately no driver ZIP packaging: the Vulkan DGC implementation is not integrated yet.
