@@ -106,7 +106,10 @@ jobs:
           meson setup build-android-aarch64 --cross-file android-aarch64.txt --prefix /tmp/turnip-control -Dbuildtype=release -Dstrip=true -Dcpp_args=-Wno-c++11-narrowing -Dplatforms=android -Dvideo-codecs= -Dplatform-sdk-version=36 -Dandroid-stub=true -Dgallium-drivers= -Dvulkan-drivers=freedreno -Dvulkan-beta=true -Dfreedreno-kmds=kgsl -Degl=disabled -Dandroid-libbacktrace=disabled
           ninja -j3 -C build-android-aarch64 install
           test -s /tmp/turnip-control/lib/libvulkan_freedreno.so
-          $NDK/llvm-readelf -sW /tmp/turnip-control/lib/libvulkan_freedreno.so | grep 'tu_CreateIndirectCommandsLayoutEXT'
+          # A stripped installation library cannot expose hidden TU_GENX instances.
+          # Check actual defined symbols in the pre-strip linked binary instead.
+          test -s mesa/build-android-aarch64/src/freedreno/vulkan/libvulkan_freedreno.so
+          "$NDK/llvm-readelf" -sW mesa/build-android-aarch64/src/freedreno/vulkan/libvulkan_freedreno.so > /tmp/a830-unstripped-symbols.txt
 
       - name: Verify generated DGC driver entrypoints
         shell: bash
@@ -116,11 +119,13 @@ jobs:
           test -s "$DRIVER"
           NDK=/tmp/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin
           "$NDK/llvm-readelf" -sW "$DRIVER" > /tmp/turnip-symbols.txt
-          for symbol in tu_CreateIndirectCommandsLayoutEXT tu_GetGeneratedCommandsMemoryRequirementsEXT; do
-            grep -q "$symbol" /tmp/turnip-symbols.txt
-          done
-          for symbol in CmdExecuteGeneratedCommandsEXT CmdPreprocessGeneratedCommandsEXT; do
-            grep -q "$symbol" /tmp/turnip-symbols.txt
+          # Hidden template instances are absent from the stripped ELF symbol
+          # table, but must be DEFINED in the unstripped linked driver.
+          for symbol in tu_CreateIndirectCommandsLayoutEXT tu_DestroyIndirectCommandsLayoutEXT tu_GetGeneratedCommandsMemoryRequirementsEXT tu_CmdExecuteGeneratedCommandsEXT tu_CmdPreprocessGeneratedCommandsEXT; do
+            if ! awk -v sym="$symbol" '$7 != "UND" && index($8,sym) { found=1 } END { exit !found }' /tmp/a830-unstripped-symbols.txt; then
+              echo "ERROR: A830 DGC entrypoint not defined: $symbol"
+              exit 1
+            fi
           done
           # Weak UND references silently survive linking and crash at dispatch.
           if awk '$7 == "UND" && $8 ~ /tu_(CreateIndirectCommandsLayoutEXT|DestroyIndirectCommandsLayoutEXT|GetGeneratedCommandsMemoryRequirementsEXT|CmdExecuteGeneratedCommandsEXT|CmdPreprocessGeneratedCommandsEXT)/ { print; bad=1 } END { exit !bad }' /tmp/turnip-symbols.txt; then
