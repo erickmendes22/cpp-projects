@@ -73,6 +73,7 @@ jobs:
                        for i in range(0,len(words),8))+"\n};\n")
           print("Embedded DGC GPU preprocessor",len(b),"bytes")
           PY
+          python3 control-resonant/turnip-overlays/enable_dgc_a830.py
       - name: Android NDK r29
         run: |
           curl -fL --retry 3 https://dl.google.com/android/repository/android-ndk-r29-linux.zip -o /tmp/ndk.zip
