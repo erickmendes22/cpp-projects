@@ -10,6 +10,15 @@
 #include "vk_device_generated_commands.h"
 #include "vk_util.h"
 
+extern "C" {
+void *tu_dgc_bridge_create(struct vk_device *,
+                          const VkIndirectCommandsLayoutCreateInfoEXT *,
+                          const VkAllocationCallbacks *, size_t);
+void tu_dgc_bridge_destroy(struct vk_device *,
+                           const VkAllocationCallbacks *,
+                           struct vk_indirect_command_layout *);
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL
 tu_CreateIndirectCommandsLayoutEXT(VkDevice _device,
                                    const VkIndirectCommandsLayoutCreateInfoEXT *pCreateInfo,
@@ -18,7 +27,7 @@ tu_CreateIndirectCommandsLayoutEXT(VkDevice _device,
 {
    VK_FROM_HANDLE(tu_device, device, _device);
    struct tu_dgc_layout *layout = (struct tu_dgc_layout *)
-      vk_indirect_command_layout_create(&device->vk, pCreateInfo,
+      tu_dgc_bridge_create(&device->vk, pCreateInfo,
                                         pAllocator, sizeof(*layout));
    if (!layout)
       return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -34,7 +43,7 @@ tu_DestroyIndirectCommandsLayoutEXT(VkDevice _device,
    VK_FROM_HANDLE(tu_device, device, _device);
    VK_FROM_HANDLE(tu_dgc_layout, layout, _layout);
    if (layout)
-      vk_indirect_command_layout_destroy(&device->vk, pAllocator, &layout->vk);
+      tu_dgc_bridge_destroy(&device->vk, pAllocator, &layout->vk);
 }
 
 VKAPI_ATTR void VKAPI_CALL
