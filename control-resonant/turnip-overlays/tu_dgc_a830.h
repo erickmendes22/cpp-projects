@@ -28,8 +28,10 @@ struct tu_dgc_a830_params {
    uint32_t push_mode;
    uint32_t load_state6_opcode;
    uint32_t load_state6_control;
+   uint32_t draw_packet_opcode;
+   uint32_t draw_opcode_and_vs_offset;
 };
-static_assert(sizeof(tu_dgc_a830_params) == 72, "scalar GLSL push layout");
+static_assert(sizeof(tu_dgc_a830_params) == 80, "scalar GLSL push layout");
 
 VkResult tu_dgc_a830_init(struct tu_device *device);
 void tu_dgc_a830_finish(struct tu_device *device);
