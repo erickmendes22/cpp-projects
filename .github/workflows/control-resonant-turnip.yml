@@ -60,6 +60,12 @@ jobs:
           assert anchor in s
           s='#include "tu_dgc_a830.h"\n'+s.replace(anchor,"   tu_dgc_a830_finish(device);\n"+anchor,1)
           d.write_text(s)
+          c=v/"tu_cmd_buffer.cc"
+          source=c.read_text()
+          entry="TU_GENX(tu_CmdDispatchIndirect);"
+          assert entry in source
+          c.write_text(source.replace(entry,
+                       entry+"\n#include \"tu_dgc_a830_cmd.inc\"",1))
           b=Path("/tmp/tu_dgc_a830.spv").read_bytes()
           words=struct.unpack("<%dI"%(len(b)//4),b)
           (v/"tu_dgc_a830_spv.h").write_text("#pragma once\n#include <stdint.h>\nstatic const uint32_t tu_dgc_a830_spv[] = {\n"+
