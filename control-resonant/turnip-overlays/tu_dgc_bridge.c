@@ -5,6 +5,13 @@
 #include "vk_device_generated_commands.h"
 #include "vk_device.h"
 
+void *tu_dgc_bridge_create(struct vk_device *device,
+                           const VkIndirectCommandsLayoutCreateInfoEXT *ci,
+                           const VkAllocationCallbacks *alloc, size_t size);
+void tu_dgc_bridge_destroy(struct vk_device *device,
+                           const VkAllocationCallbacks *alloc,
+                           struct vk_indirect_command_layout *layout);
+
 void *
 tu_dgc_bridge_create(struct vk_device *device,
                      const VkIndirectCommandsLayoutCreateInfoEXT *ci,
