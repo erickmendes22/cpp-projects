@@ -3,77 +3,63 @@ name: CONTROL Resonant A830 - Turnip DGC integration compile
 on:
   push:
     branches: [control-resonant-dgc-a830]
-    paths:
-      - "control-resonant/turnip-overlays/**"
-      - ".github/workflows/control-resonant-turnip.yml"
+    paths: ["control-resonant/turnip-overlays/**", ".github/workflows/control-resonant-turnip.yml"]
   workflow_dispatch:
 
 jobs:
-  compile-dgc-layout:
+  compile-dgc:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Install compiler and Vulkan dependencies
+      - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build clang lld patchelf flex bison \
-            glslang-tools spirv-tools git python3-pip pkg-config ccache \
-            unzip curl libdrm-dev zip
+          sudo apt-get install -y ninja-build clang lld patchelf flex bison glslang-tools spirv-tools git python3-pip pkg-config ccache unzip curl libdrm-dev zip
           python3 -m pip install --user --break-system-packages 'meson>=1.4' mako
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Fetch pinned A8xx Turnip source
-        run: |
-          git clone --depth=1 --branch turnip/gen8 \
-            https://github.com/whitebelyash/mesa-unified.git mesa
-          git -C mesa rev-parse HEAD
-      - name: Apply experimental DGC layout sources
+      - name: Mesa A830 source
+        run: git clone --depth=1 --branch turnip/gen8 https://github.com/whitebelyash/mesa-unified.git mesa
+      - name: Inject Vulkan DGC prototype
+        shell: bash
         run: |
           set -euo pipefail
           cp control-resonant/turnip-overlays/tu_dgc_a830.{h,cc} mesa/src/freedreno/vulkan/
           cp control-resonant/turnip-overlays/tu_dgc_bridge.c mesa/src/freedreno/vulkan/
-          python3 - <<'PY'
-          from pathlib import Path
-          f=Path("mesa/src/freedreno/vulkan/meson.build")
-          s=f.read_text()
-          needle="  'tu_device.cc',"
-          assert needle in s
-          s=s.replace(needle,needle+"\n  'tu_dgc_a830.cc',\n  'tu_dgc_bridge.c',",1)
-          f.write_text(s)
-          device_header=Path("mesa/src/freedreno/vulkan/tu_device.h")
-          s=device_header.read_text()
-          key="struct tu_device\n{\n   struct vk_device vk;"
-          assert key in s
-          s=s.replace(key, key+"\n   VkPipeline dgc_a830_pipeline;\n   VkPipelineLayout dgc_a830_pipeline_layout;",1)
-          device_header.write_text(s)
-          dev=Path("mesa/src/freedreno/vulkan/tu_device.cc")
-          s=dev.read_text()
-          s='#include "tu_dgc_a830.h"\n'+s
-          assert "   tu_destroy_clear_blit_shaders(device);" in s
-          s=s.replace("   tu_destroy_clear_blit_shaders(device);",
-                      "   tu_dgc_a830_finish(device);\n   tu_destroy_clear_blit_shaders(device);",1)
-          dev.write_text(s)
-          PY
-          glslangValidator -V --target-env vulkan1.2 -S comp \
-            control-resonant/dgc_pm4_layout.comp -o /tmp/tu_dgc_a830.spv
+          glslangValidator -V --target-env vulkan1.2 -S comp control-resonant/dgc_pm4_layout.comp -o /tmp/tu_dgc_a830.spv
           spirv-val --target-env vulkan1.2 /tmp/tu_dgc_a830.spv
           python3 - <<'PY'
           from pathlib import Path
           import struct
-          data=Path("/tmp/tu_dgc_a830.spv").read_bytes()
-          assert len(data)%4 == 0
-          words=struct.unpack("<%dI"%(len(data)//4), data)
-          out=Path("mesa/src/freedreno/vulkan/tu_dgc_a830_spv.h")
-          out.write_text("#pragma once\n#include <stdint.h>\nstatic const uint32_t tu_dgc_a830_spv[] = {\n"+
-              "\n".join("  "+", ".join("0x%08xu"%v for v in words[i:i+8])+","
-                        for i in range(0,len(words),8))+"\n};\n")
-          print("Embedded",len(data),"bytes SPIR-V for A830 DGC")
+          v=Path("mesa/src/freedreno/vulkan")
+          m=v/"meson.build"
+          s=m.read_text()
+          anchor="  'tu_device.cc',"
+          assert anchor in s
+          m.write_text(s.replace(anchor, anchor+"\n  'tu_dgc_a830.cc',\n  'tu_dgc_bridge.c',",1))
+          h=v/"tu_device.h"
+          s=h.read_text()
+          anchor="struct tu_device\n{\n   struct vk_device vk;"
+          assert anchor in s
+          h.write_text(s.replace(anchor,anchor+"\n   VkPipeline dgc_a830_pipeline;\n   VkPipelineLayout dgc_a830_pipeline_layout;",1))
+          d=v/"tu_device.cc"
+          s=d.read_text()
+          anchor="   tu_destroy_clear_blit_shaders(device);"
+          assert anchor in s
+          s='#include "tu_dgc_a830.h"\n'+s.replace(anchor,"   tu_dgc_a830_finish(device);\n"+anchor,1)
+          d.write_text(s)
+          b=Path("/tmp/tu_dgc_a830.spv").read_bytes()
+          words=struct.unpack("<%dI"%(len(b)//4),b)
+          (v/"tu_dgc_a830_spv.h").write_text("#pragma once\n#include <stdint.h>\nstatic const uint32_t tu_dgc_a830_spv[] = {\n"+
+             "\n".join("  "+", ".join(f"0x{x:08x}u" for x in words[i:i+8])+","
+                       for i in range(0,len(words),8))+"\n};\n")
+          print("Embedded DGC GPU preprocessor",len(b),"bytes")
           PY
-      - name: Fetch Android NDK
+      - name: Android NDK r29
         run: |
           curl -fL --retry 3 https://dl.google.com/android/repository/android-ndk-r29-linux.zip -o /tmp/ndk.zip
           unzip -q /tmp/ndk.zip -d /tmp
-      - name: Configure Mesa Android AArch64
+      - name: Cross compile
         run: |
           set -euo pipefail
           NDK=/tmp/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin
@@ -93,16 +79,8 @@ jobs:
           endian = 'little'
           EOF
           cd mesa
-          meson setup build-android-aarch64 --cross-file android-aarch64.txt \
-            --prefix /tmp/turnip-control \
-            -Dbuildtype=release -Dstrip=true -Dcpp_args=-Wno-c++11-narrowing -Dplatforms=android \
-            -Dvideo-codecs= -Dplatform-sdk-version=36 -Dandroid-stub=true \
-            -Dgallium-drivers= -Dvulkan-drivers=freedreno \
-            -Dvulkan-beta=true -Dfreedreno-kmds=kgsl \
-            -Degl=disabled -Dandroid-libbacktrace=disabled
-      - name: Build Turnip with Vulkan DGC layout implementation
-        run: |
-          ninja -j3 -C mesa/build-android-aarch64 install
+          meson setup build-android-aarch64 --cross-file android-aarch64.txt --prefix /tmp/turnip-control -Dbuildtype=release -Dstrip=true -Dcpp_args=-Wno-c++11-narrowing -Dplatforms=android -Dvideo-codecs= -Dplatform-sdk-version=36 -Dandroid-stub=true -Dgallium-drivers= -Dvulkan-drivers=freedreno -Dvulkan-beta=true -Dfreedreno-kmds=kgsl -Degl=disabled -Dandroid-libbacktrace=disabled
+          ninja -j3 -C build-android-aarch64 install
           test -s /tmp/turnip-control/lib/libvulkan_freedreno.so
-          /tmp/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf -sW /tmp/turnip-control/lib/libvulkan_freedreno.so | grep 'tu_CreateIndirectCommandsLayoutEXT'
-# No installable ZIP until GPU preprocessing and execution is implemented.
+          $NDK/llvm-readelf -sW /tmp/turnip-control/lib/libvulkan_freedreno.so | grep 'tu_CreateIndirectCommandsLayoutEXT'
+# Prototype binary is not published because GPU DGC dispatch not yet integrated.
