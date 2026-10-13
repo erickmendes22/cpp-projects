@@ -1,9 +1,11 @@
 name: Adreno A830 source compatibility patch validation
 on:
-  push:
-    branches: [control-resonant-dgc-a830]
-    paths: ["control-resonant/a830-compat/**", ".github/workflows/control-resonant-compat.yml"]
   workflow_dispatch:
+
+concurrency:
+  group: control-resonant-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   patch-check:
     runs-on: ubuntu-24.04

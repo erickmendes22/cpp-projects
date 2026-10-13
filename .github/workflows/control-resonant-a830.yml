@@ -1,12 +1,10 @@
 name: CONTROL Resonant A830 - preliminary shader validation
-
 on:
-  push:
-    branches: [control-resonant-dgc-a830]
-    paths:
-      - "control-resonant/**"
-      - ".github/workflows/control-resonant-a830.yml"
   workflow_dispatch:
+
+concurrency:
+  group: control-resonant-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate-indirect-encoding:
