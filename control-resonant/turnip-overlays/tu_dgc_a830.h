@@ -12,4 +12,25 @@ struct tu_dgc_layout {
 VK_DEFINE_NONDISP_HANDLE_CASTS(tu_dgc_layout, vk.base,
                                VkIndirectCommandsLayoutEXT,
                                VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_EXT)
+struct tu_dgc_a830_params {
+   uint64_t indirect_address;
+   uint64_t output_pm4_address;
+   uint64_t sequence_count_address;
+   uint32_t maximum_count;
+   uint32_t indirect_stride;
+   uint32_t index_token_offset;
+   uint32_t constants_token_offset;
+   uint32_t draw_token_offset;
+   uint32_t shared_constant_register;
+   uint32_t vertex_offset_register;
+   uint32_t draw_initiator_u16;
+   uint32_t draw_initiator_u32;
+   uint32_t push_mode;
+   uint32_t load_state6_opcode;
+   uint32_t load_state6_control;
+};
+static_assert(sizeof(tu_dgc_a830_params) == 72, "scalar GLSL push layout");
+
+VkResult tu_dgc_a830_init(struct tu_device *device);
+void tu_dgc_a830_finish(struct tu_device *device);
 #endif
