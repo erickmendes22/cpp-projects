@@ -32,9 +32,6 @@ jobs:
           set -euo pipefail
           cp control-resonant/turnip-overlays/tu_dgc_a830.{h,cc} mesa/src/freedreno/vulkan/
           cp control-resonant/turnip-overlays/tu_dgc_bridge.c mesa/src/freedreno/vulkan/
-          glslangValidator -V --target-env vulkan1.2 -S comp -x \
-            --vn tu_dgc_a830_spv -o mesa/src/freedreno/vulkan/tu_dgc_a830_spv.h \
-            control-resonant/dgc_pm4_layout.comp
           python3 - <<'PY'
           from pathlib import Path
           f=Path("mesa/src/freedreno/vulkan/meson.build")
@@ -43,19 +40,6 @@ jobs:
           assert needle in s
           s=s.replace(needle,needle+"\n  'tu_dgc_a830.cc',\n  'tu_dgc_bridge.c',",1)
           f.write_text(s)
-          h=Path("mesa/src/freedreno/vulkan/tu_device.h")
-          htxt=h.read_text()
-          anchor="struct tu_device\n{"
-          assert anchor in htxt
-          htxt=htxt.replace(anchor, anchor+"\n   VkPipeline dgc_a830_pipeline;\n   VkPipelineLayout dgc_a830_pipeline_layout;",1)
-          h.write_text(htxt)
-          d=Path("mesa/src/freedreno/vulkan/tu_device.cc")
-          txt=d.read_text()
-          assert '#include "tu_device.h"' in txt
-          txt=txt.replace('#include "tu_device.h"', '#include "tu_device.h"\n#include "tu_dgc_a830.h"',1)
-          assert "tu_destroy_empty_shaders(device);" in txt
-          txt=txt.replace("tu_destroy_empty_shaders(device);", "tu_dgc_a830_finish(device);\n   tu_destroy_empty_shaders(device);",1)
-          d.write_text(txt)
           device_header=Path("mesa/src/freedreno/vulkan/tu_device.h")
           s=device_header.read_text()
           key="struct tu_device\n{\n   struct vk_device vk;"
