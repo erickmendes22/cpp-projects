@@ -102,4 +102,53 @@ jobs:
           ninja -j3 -C build-android-aarch64 install
           test -s /tmp/turnip-control/lib/libvulkan_freedreno.so
           $NDK/llvm-readelf -sW /tmp/turnip-control/lib/libvulkan_freedreno.so | grep 'tu_CreateIndirectCommandsLayoutEXT'
-# Prototype binary is not published because GPU DGC dispatch not yet integrated.
+
+      - name: Verify generated DGC driver entrypoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          DRIVER=/tmp/turnip-control/lib/libvulkan_freedreno.so
+          test -s "$DRIVER"
+          NDK=/tmp/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin
+          "$NDK/llvm-readelf" -sW "$DRIVER" > /tmp/turnip-symbols.txt
+          for symbol in tu_CreateIndirectCommandsLayoutEXT tu_GetGeneratedCommandsMemoryRequirementsEXT; do
+            grep -q "$symbol" /tmp/turnip-symbols.txt
+          done
+          for symbol in CmdExecuteGeneratedCommandsEXT CmdPreprocessGeneratedCommandsEXT; do
+            grep -q "$symbol" /tmp/turnip-symbols.txt
+          done
+          grep -q 'deviceGeneratedCommands' mesa/src/freedreno/vulkan/tu_device.cc
+          grep -q 'tu_cs_set_writeable(stream, true)' mesa/src/freedreno/vulkan/tu_dgc_a830_cmd.inc
+          echo 'A830 DGC code and Vulkan registration included in Android binary'
+
+      - name: Package experimental driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/control-turnip
+          cp /tmp/turnip-control/lib/libvulkan_freedreno.so /tmp/control-turnip/
+          cat > /tmp/control-turnip/meta.json <<'EOF'
+          {
+            "schemaVersion": 1,
+            "name": "Turnip A830 CONTROL DGC experimental",
+            "description": "A830 GPU generated draw commands prototype. Hardware validation required.",
+            "author": "erickmendes22",
+            "packageVersion": "8",
+            "vendor": "Mesa",
+            "driverVersion": "Vulkan 1.4.359",
+            "minApi": 28,
+            "libraryName": "libvulkan_freedreno.so"
+          }
+          EOF
+          python3 -m json.tool /tmp/control-turnip/meta.json >/dev/null
+          cd /tmp/control-turnip
+          zip -9 /tmp/CONTROL_Resonant_A830_Turnip_DGC_experimental.zip libvulkan_freedreno.so meta.json
+          unzip -t /tmp/CONTROL_Resonant_A830_Turnip_DGC_experimental.zip
+
+      - name: Upload experimental Turnip test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: CONTROL-Resonant-A830-Turnip-DGC-experimental
+          path: /tmp/CONTROL_Resonant_A830_Turnip_DGC_experimental.zip
+          if-no-files-found: error
+
