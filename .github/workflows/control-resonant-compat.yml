@@ -10,15 +10,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Fetch A830 26.3 source
-        run: git clone --depth=1 --branch turnip/gen8 https://github.com/whitebelyash/mesa-unified.git mesa
+        run: git clone --depth=1 --branch main https://gitlab.freedesktop.org/mesa/mesa.git mesa
       - name: Apply original feature-preserving A830 patches
         run: |
           set -eu
           cd mesa
           for p in ../control-resonant/a830-compat/*.patch; do
             echo "CHECK $p"
-            git apply --check "$p"
-            git apply "$p"
+            patch -p1 -N --fuzz=3 --no-backup-if-mismatch < "$p"
           done
           test -s src/freedreno/vulkan/tu_mesh.cc
           grep -q "tu_mesh.cc" src/freedreno/vulkan/meson.build
