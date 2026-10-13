@@ -325,14 +325,30 @@ tu_CmdExecuteGeneratedCommandsEXT(
       return;
    }
    if (layout && tu_dgc_a830_mesh_layout(layout)) {
-      struct tu_mesh_draw mesh = {
-         .indirect = generated->indirectAddress + layout->vk.draw_src_offset_B,
-         .count = generated->sequenceCountAddress,
-         .draw_count = generated->maxSequenceCount,
-         .stride = (uint32_t)layout->vk.stride,
-      };
-      if (mesh.draw_count)
-         tu_mesh_draw<CHIP>(cmd, &mesh);
+      /* Native VK_EXT_mesh_shader code takes VkBuffer handles, while
+       * Vulkan DGC provides raw device addresses.  The temporary wrappers
+       * are used only during command recording, never retained by the GPU.
+       */
+      if (!generated->maxSequenceCount)
+         return;
+      struct tu_buffer indirect_buffer = {};
+      indirect_buffer.vk.device_address = generated->indirectAddress;
+      indirect_buffer.vk.size = generated->indirectAddressSize;
+      VkBuffer ib = tu_buffer_to_handle(&indirect_buffer);
+      auto vk = &cmd->device->vk.dispatch_table;
+      if (generated->sequenceCountAddress) {
+         struct tu_buffer count_buffer = {};
+         count_buffer.vk.device_address = generated->sequenceCountAddress;
+         count_buffer.vk.size = sizeof(uint32_t);
+         vk->CmdDrawMeshTasksIndirectCountEXT(commandBuffer, ib,
+             layout->vk.draw_src_offset_B,
+             tu_buffer_to_handle(&count_buffer), 0,
+             generated->maxSequenceCount, (uint32_t)layout->vk.stride);
+      } else {
+         vk->CmdDrawMeshTasksIndirectEXT(commandBuffer, ib,
+             layout->vk.draw_src_offset_B,
+             generated->maxSequenceCount, (uint32_t)layout->vk.stride);
+      }
       return;
    }
    if (!layout || !tu_dgc_a830_supported_layout(layout) ||
