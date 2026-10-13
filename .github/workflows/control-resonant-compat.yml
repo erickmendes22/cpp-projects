@@ -10,7 +10,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Fetch A830 26.3 source
-        run: git clone --depth=1 --branch main https://gitlab.freedesktop.org/mesa/mesa.git mesa
+        run: |
+          git clone --depth=1 --branch main https://gitlab.freedesktop.org/mesa/mesa.git mesa
+          git -C mesa fetch --depth=1 origin 4da08cb8adfbdc103bc517b45040a19957b7404d
+          git -C mesa checkout --detach FETCH_HEAD
       - name: Apply original feature-preserving A830 patches
         run: |
           set -eu
